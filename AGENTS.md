@@ -58,7 +58,7 @@ The XR frontend is in the `teleop/televuer/` submodule. The key file is `src/tel
 Pass `--frequency <hz>` on the CLI. Default is 30 Hz. This affects the main control loop in `teleop_hand_and_arm.py`. The arm controller's internal publish rate (250 Hz) and subscribe rate (500 Hz) are separate and hardcoded in `robot_arm.py`.
 
 ### "I want to record training data"
-Pass `--record` on the CLI. Press `r` to start teleop, then `s` to start/stop recording. Data is written by `teleop/utils/episode_writer.py` to `teleop/utils/data/` with structure: `episode_NNNN/{data.json, colors/, depths/, audios/}`. Configure with `--task-dir`, `--task-goal`, `--task-description`.
+Pass `--record` on the CLI. Press `r` to start teleop, then `s` to start/stop recording. Data is written by `teleop/utils/episode_writer.py` to `teleop/utils/data/` with structure: `episode_NNNN/{data.json, colors/, depths/, audios/}`. Configure with `--task-dir`, `--task-name`, `--task-goal`, `--task-desc`, `--task-steps`.
 
 ### "I want to run in simulation"
 Pass `--sim` on the CLI. This uses DDS channel 1 instead of channel 0. Requires [unitree_sim_isaaclab](https://github.com/unitreerobotics/unitree_sim_isaaclab) running separately. Example: `python teleop_hand_and_arm.py --arm=G1_29 --ee=dex3 --sim`

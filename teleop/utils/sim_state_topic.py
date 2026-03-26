@@ -149,7 +149,7 @@ class SharedMemoryManager:
             if self.created:
                 try:
                     self.shm.unlink()
-                except:
+                except FileNotFoundError:
                     pass
 
     def __del__(self) -> None:
@@ -243,10 +243,10 @@ class SimStateSubscriber:
                     msg: Optional[String_] = self.subscriber.Read()
                     if msg:
                         data: Dict[str, Any] = json.loads(msg.data)
+                        if self.shared_memory and data:
+                            self.shared_memory.write_data(data)
                     else:
                         logger_mp.warning("[SimStateSubscriber] Received None message")
-                    if self.shared_memory and data:
-                        self.shared_memory.write_data(data)
                 else:
                     logger_mp.error("[SimStateSubscriber] Subscriber is not initialized")
                 time.sleep(0.002)

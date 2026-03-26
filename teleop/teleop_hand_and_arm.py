@@ -251,8 +251,29 @@ if __name__ == '__main__':
                 loco_wrapper = LocoClientWrapper()
         else:
             motion_switcher = MotionSwitcher()
-            status, result = motion_switcher.Enter_Debug_Mode()
-            logger_mp.info(f"Enter debug mode: {'Success' if status == 0 else 'Failed'}")
+            try:
+                status, result = motion_switcher.Enter_Debug_Mode()
+                if status != 0:
+                    logger_mp.warning(
+                        f"Enter debug mode: Failed (status={status})\n"
+                        f"  Possible causes:\n"
+                        f"    - Robot is not powered on or not in zero-torque state\n"
+                        f"    - Network interface is not connected to the robot (192.168.123.x)\n"
+                        f"    - Robot firmware does not support the debug mode API\n"
+                        f"  Suggestions:\n"
+                        f"    - Verify the robot is on: ping 192.168.123.161\n"
+                        f"    - Restart the robot and wait for zero-torque state (~60s)\n"
+                        f"    - Try using --motion flag instead for motion mode control"
+                    )
+                else:
+                    logger_mp.info("Enter debug mode: Success")
+            except Exception as e:
+                logger_mp.error(
+                    f"Enter debug mode: Exception — {e}\n"
+                    f"  Check that the robot is powered on and reachable at 192.168.123.x.\n"
+                    f"  Run 'ping 192.168.123.161' to verify connectivity."
+                )
+                raise
 
         # Select the arm IK solver and controller based on the robot model.
         # Each robot model (G1_29, G1_23, H1_2, H1) has its own kinematic chain

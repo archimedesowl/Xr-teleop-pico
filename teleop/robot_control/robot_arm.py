@@ -374,7 +374,7 @@ class G1_29_ArmController:
             # Gradually increase velocity limit if ramp is active
             if self._speed_gradual_max is True:
                 t_elapsed = start_time - self._gradual_start_time
-                self.arm_velocity_limit = 20.0 + (10.0 * min(1.0, t_elapsed / 5.0))
+                self.arm_velocity_limit = 20.0 + (10.0 * min(1.0, t_elapsed / self._gradual_time))
 
             # Sleep for the remainder of the control period to maintain 250 Hz
             current_time = time.time()
@@ -849,7 +849,7 @@ class G1_23_ArmController:
             # Gradually increase velocity limit if ramp is active
             if self._speed_gradual_max is True:
                 t_elapsed = start_time - self._gradual_start_time
-                self.arm_velocity_limit = 20.0 + (10.0 * min(1.0, t_elapsed / 5.0))
+                self.arm_velocity_limit = 20.0 + (10.0 * min(1.0, t_elapsed / self._gradual_time))
 
             # Sleep for the remainder of the control period to maintain 250 Hz
             current_time = time.time()
@@ -1320,7 +1320,7 @@ class H1_2_ArmController:
             # Gradually increase velocity limit if ramp is active
             if self._speed_gradual_max is True:
                 t_elapsed = start_time - self._gradual_start_time
-                self.arm_velocity_limit = 20.0 + (10.0 * min(1.0, t_elapsed / 5.0))
+                self.arm_velocity_limit = 20.0 + (10.0 * min(1.0, t_elapsed / self._gradual_time))
 
             # Sleep for the remainder of the control period to maintain 250 Hz
             current_time = time.time()
@@ -1778,7 +1778,7 @@ class H1_ArmController:
             # Gradually increase velocity limit if ramp is active
             if self._speed_gradual_max is True:
                 t_elapsed = start_time - self._gradual_start_time
-                self.arm_velocity_limit = 20.0 + (10.0 * min(1.0, t_elapsed / 5.0))
+                self.arm_velocity_limit = 20.0 + (10.0 * min(1.0, t_elapsed / self._gradual_time))
 
             # Sleep for the remainder of the control period to maintain 250 Hz
             current_time = time.time()
