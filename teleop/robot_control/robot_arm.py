@@ -408,9 +408,11 @@ class G1_29_ArmController:
         (not the buffered copy) to obtain the mode_machine field.
 
         Returns:
-            The mode_machine integer from the robot's low-state message.
+            The mode_machine integer from the robot's low-state message,
+            or 0 if the message is not yet available.
         """
-        return self.lowstate_subscriber.Read().mode_machine
+        msg = self.lowstate_subscriber.Read()
+        return msg.mode_machine if msg else 0
 
     def get_current_motor_q(self) -> np.ndarray:
         """Return current joint positions of all body motors.
@@ -883,9 +885,11 @@ class G1_23_ArmController:
         (not the buffered copy) to obtain the mode_machine field.
 
         Returns:
-            The mode_machine integer from the robot's low-state message.
+            The mode_machine integer from the robot's low-state message,
+            or 0 if the message is not yet available.
         """
-        return self.lowstate_subscriber.Read().mode_machine
+        msg = self.lowstate_subscriber.Read()
+        return msg.mode_machine if msg else 0
 
     def get_current_motor_q(self) -> np.ndarray:
         """Return current joint positions of all body motors.
@@ -1354,9 +1358,11 @@ class H1_2_ArmController:
         (not the buffered copy) to obtain the mode_machine field.
 
         Returns:
-            The mode_machine integer from the robot's low-state message.
+            The mode_machine integer from the robot's low-state message,
+            or 0 if the message is not yet available.
         """
-        return self.lowstate_subscriber.Read().mode_machine
+        msg = self.lowstate_subscriber.Read()
+        return msg.mode_machine if msg else 0
 
     def get_current_motor_q(self) -> np.ndarray:
         """Return current joint positions of all body motors.
