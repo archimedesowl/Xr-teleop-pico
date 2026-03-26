@@ -95,6 +95,10 @@ Main entry point. Parses CLI args, initializes all subsystems, runs the main con
 - `--frequency`: Control loop frequency (default 30 Hz)
 - `--input-mode`: `hand` (hand tracking) or `controller` (VR controller)
 - `--display-mode`: `immersive`, `ego`, or `pass-through`
+- `--dds-channel`: DDS domain ID override (0=real, 1=sim). Auto-detected from --sim.
+
+**Environment Variables:**
+- `DDS_SUBSCRIBE_TIMEOUT` (default 15 seconds) — controls how long to wait for DDS subscription before timeout.
 
 ---
 
