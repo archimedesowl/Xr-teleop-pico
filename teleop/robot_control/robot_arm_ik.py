@@ -73,8 +73,8 @@ class G1_29_ArmIK:
         self.Unit_Test = Unit_Test
         self.Visualization = Visualization
 
-        # fixed cache file path
-        self.cache_path = "g1_29_model_cache.pkl"
+        # fixed cache file path (absolute, relative to this source file)
+        self.cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", "g1", "g1_29_model_cache.pkl")
 
         if not self.Unit_Test:
             self.urdf_path = '../assets/g1/g1_body29_hand14.urdf'
@@ -443,8 +443,8 @@ class G1_23_ArmIK:
         self.Unit_Test = Unit_Test
         self.Visualization = Visualization
 
-        # fixed cache file path
-        self.cache_path = "g1_23_model_cache.pkl"
+        # fixed cache file path (absolute, relative to this source file)
+        self.cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", "g1", "g1_23_model_cache.pkl")
 
         if not self.Unit_Test:
             self.urdf_path = '../assets/g1/g1_body23.urdf'
@@ -782,8 +782,8 @@ class H1_2_ArmIK:
         self.Unit_Test = Unit_Test
         self.Visualization = Visualization
 
-        # fixed cache file path
-        self.cache_path = "h1_2_model_cache.pkl"
+        # fixed cache file path (absolute, relative to this source file)
+        self.cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", "h1_2", "h1_2_model_cache.pkl")
 
         if not self.Unit_Test:
             self.urdf_path = '../assets/h1_2/h1_2.urdf'
@@ -1146,8 +1146,8 @@ class H1_ArmIK:
         self.Unit_Test = Unit_Test
         self.Visualization = Visualization
 
-        # fixed cache file path
-        self.cache_path = "h1_model_cache.pkl"
+        # fixed cache file path (absolute, relative to this source file)
+        self.cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", "h1", "h1_model_cache.pkl")
 
         if not self.Unit_Test:
             self.urdf_path = '../assets/h1/h1_with_hand.urdf'
