@@ -129,7 +129,17 @@ else
     ok "Conda environment '$ENV_NAME' created"
 fi
 
-conda activate "$ENV_NAME"
+conda activate "$ENV_NAME" 2>/dev/null || {
+    # Fallback: source the activate script directly
+    CONDA_BASE=$(conda info --base 2>/dev/null)
+    if [[ -n "$CONDA_BASE" ]] && [[ -f "$CONDA_BASE/etc/profile.d/conda.sh" ]]; then
+        source "$CONDA_BASE/etc/profile.d/conda.sh"
+        conda activate "$ENV_NAME"
+    else
+        err "Failed to activate conda environment '$ENV_NAME'. Try: conda activate $ENV_NAME"
+        exit 1
+    fi
+}
 ok "Activated conda environment '$ENV_NAME'"
 
 # --- Install unitree_sdk2_python ---
