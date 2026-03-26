@@ -10,7 +10,7 @@
 #
 # Output directory: ./certs/
 #   - ca.key, ca.crt       — Certificate Authority (install ca.crt on XR device)
-#   - server.key, server.crt — Server certificate (used by televuer)
+#   - key.pem, cert.pem    — Server certificate (used by televuer)
 
 set -euo pipefail
 
@@ -44,7 +44,7 @@ mkdir -p "$CERT_DIR"
 # Detect host IP on the robot subnet (192.168.123.x)
 HOST_IP=""
 for iface in $(ls /sys/class/net/ 2>/dev/null); do
-    ip_addr=$(ip -4 addr show "$iface" 2>/dev/null | grep -oP '(?<=inet\s)192\.168\.123\.\d+' | head -1)
+    ip_addr=$(ip -4 addr show "$iface" 2>/dev/null | grep -o 'inet 192\.168\.123\.[0-9]*' | awk '{print $2}' | head -1)
     if [ -n "$ip_addr" ]; then
         HOST_IP="$ip_addr"
         echo "[generate_certs] Detected host IP on robot subnet: $HOST_IP (interface: $iface)"
@@ -64,6 +64,7 @@ echo "[generate_certs] Certificates will include SAN for: $HOST_IP, localhost, 1
 # --- Step 1: Generate CA key and certificate ---
 echo "[generate_certs] Step 1/3: Generating CA certificate..."
 openssl genrsa -out "$CERT_DIR/ca.key" "$KEY_SIZE" 2>/dev/null
+chmod 600 "$CERT_DIR/ca.key"
 
 openssl req -x509 -new -nodes \
     -key "$CERT_DIR/ca.key" \
@@ -74,7 +75,8 @@ openssl req -x509 -new -nodes \
 
 # --- Step 2: Generate server key and CSR ---
 echo "[generate_certs] Step 2/3: Generating server certificate..."
-openssl genrsa -out "$CERT_DIR/server.key" "$KEY_SIZE" 2>/dev/null
+openssl genrsa -out "$CERT_DIR/key.pem" "$KEY_SIZE" 2>/dev/null
+chmod 600 "$CERT_DIR/key.pem"
 
 # Create SAN config
 cat > "$CERT_DIR/san.cnf" <<EOF
@@ -101,7 +103,7 @@ IP.2 = $HOST_IP
 EOF
 
 openssl req -new -nodes \
-    -key "$CERT_DIR/server.key" \
+    -key "$CERT_DIR/key.pem" \
     -out "$CERT_DIR/server.csr" \
     -config "$CERT_DIR/san.cnf"
 
@@ -112,7 +114,7 @@ openssl x509 -req \
     -CA "$CERT_DIR/ca.crt" \
     -CAkey "$CERT_DIR/ca.key" \
     -CAcreateserial \
-    -out "$CERT_DIR/server.crt" \
+    -out "$CERT_DIR/cert.pem" \
     -days "$DAYS_VALID" \
     -sha256 \
     -extensions v3_req \
@@ -120,6 +122,13 @@ openssl x509 -req \
 
 # Clean up intermediate files
 rm -f "$CERT_DIR/server.csr" "$CERT_DIR/san.cnf" "$CERT_DIR/ca.srl"
+
+# Copy certs to default televuer config directory
+XR_CONFIG_DIR="$HOME/.config/xr_teleoperate"
+mkdir -p "$XR_CONFIG_DIR"
+cp "$CERT_DIR/cert.pem" "$XR_CONFIG_DIR/cert.pem"
+cp "$CERT_DIR/key.pem" "$XR_CONFIG_DIR/key.pem"
+chmod 600 "$XR_CONFIG_DIR/key.pem"
 
 # --- Done ---
 echo ""
@@ -130,8 +139,10 @@ echo ""
 echo "Files created in $CERT_DIR/:"
 echo "  ca.key      — CA private key (keep secret)"
 echo "  ca.crt      — CA certificate (install on XR device)"
-echo "  server.key  — Server private key"
-echo "  server.crt  — Server certificate"
+echo "  key.pem     — Server private key"
+echo "  cert.pem    — Server certificate"
+echo ""
+echo "Also copied to $XR_CONFIG_DIR/ (televuer default location)"
 echo ""
 
 # Device-specific instructions
@@ -143,8 +154,8 @@ case "$DEVICE" in
         echo "2. On PICO: Settings → Security → Install from storage"
         echo "3. Select ca.crt and install as 'CA certificate'"
         echo "4. Start televuer with the generated certs:"
-        echo "   export SSL_CERT=$CERT_DIR/server.crt"
-        echo "   export SSL_KEY=$CERT_DIR/server.key"
+        echo "   export XR_TELEOP_CERT=$CERT_DIR/cert.pem"
+        echo "   export XR_TELEOP_KEY=$CERT_DIR/key.pem"
         ;;
     quest)
         echo "=== Quest Setup Instructions ==="
