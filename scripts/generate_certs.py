@@ -9,11 +9,12 @@ The XR device must trust the CA certificate to establish a secure WSS connection
 
 Output directory: ./certs/
     ca.key, ca.crt       - Certificate Authority (install ca.crt on XR device)
-    server.key, server.crt - Server certificate (used by televuer)
+    key.pem, cert.pem    - Server certificate (used by televuer)
 """
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -77,6 +78,7 @@ def generate_certs(device: str, host_ip: str, cert_dir: str = "./certs") -> None
     subprocess.run([
         "openssl", "genrsa", "-out", str(cert_path / "ca.key"), key_size
     ], check=True, capture_output=True)
+    os.chmod(cert_path / "ca.key", 0o600)
 
     subprocess.run([
         "openssl", "req", "-x509", "-new", "-nodes",
@@ -89,8 +91,9 @@ def generate_certs(device: str, host_ip: str, cert_dir: str = "./certs") -> None
     # Step 2: Generate server key and CSR
     print("[generate_certs] Step 2/3: Generating server certificate...")
     subprocess.run([
-        "openssl", "genrsa", "-out", str(cert_path / "server.key"), key_size
+        "openssl", "genrsa", "-out", str(cert_path / "key.pem"), key_size
     ], check=True, capture_output=True)
+    os.chmod(cert_path / "key.pem", 0o600)
 
     # Write SAN config
     san_cnf = cert_path / "san.cnf"
@@ -118,7 +121,7 @@ IP.2 = {host_ip}
 
     subprocess.run([
         "openssl", "req", "-new", "-nodes",
-        "-key", str(cert_path / "server.key"),
+        "-key", str(cert_path / "key.pem"),
         "-out", str(cert_path / "server.csr"),
         "-config", str(san_cnf)
     ], check=True, capture_output=True)
@@ -131,7 +134,7 @@ IP.2 = {host_ip}
         "-CA", str(cert_path / "ca.crt"),
         "-CAkey", str(cert_path / "ca.key"),
         "-CAcreateserial",
-        "-out", str(cert_path / "server.crt"),
+        "-out", str(cert_path / "cert.pem"),
         "-days", days_valid,
         "-sha256",
         "-extensions", "v3_req",
@@ -147,11 +150,20 @@ IP.2 = {host_ip}
     print("  SSL certificates generated successfully!")
     print("=" * 44)
     print()
+    # Copy certs to default televuer config directory
+    xr_config_dir = Path.home() / ".config" / "xr_teleoperate"
+    xr_config_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(cert_path / "cert.pem", xr_config_dir / "cert.pem")
+    shutil.copy2(cert_path / "key.pem", xr_config_dir / "key.pem")
+    os.chmod(xr_config_dir / "key.pem", 0o600)
+
     print(f"Files created in {cert_dir}/:")
     print("  ca.key      - CA private key (keep secret)")
     print("  ca.crt      - CA certificate (install on XR device)")
-    print("  server.key  - Server private key")
-    print("  server.crt  - Server certificate")
+    print("  key.pem     - Server private key")
+    print("  cert.pem    - Server certificate")
+    print()
+    print(f"Also copied to {xr_config_dir}/ (televuer default location)")
     print()
 
     # Device-specific instructions
@@ -163,8 +175,8 @@ IP.2 = {host_ip}
             "2. On PICO: Settings -> Security -> Install from storage\n"
             "3. Select ca.crt and install as 'CA certificate'\n"
             f"4. Start televuer with the generated certs:\n"
-            f"   export SSL_CERT={cert_dir}/server.crt\n"
-            f"   export SSL_KEY={cert_dir}/server.key"
+            f"   export XR_TELEOP_CERT={cert_dir}/cert.pem\n"
+            f"   export XR_TELEOP_KEY={cert_dir}/key.pem"
         ),
         "quest": (
             "=== Quest Setup Instructions ===\n"
