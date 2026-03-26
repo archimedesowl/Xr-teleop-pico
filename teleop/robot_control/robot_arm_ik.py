@@ -1,13 +1,38 @@
-import casadi                                                                       
+"""Inverse kinematics solvers for Unitree humanoid robot arms.
+
+Uses CasADi nonlinear optimization with Pinocchio rigid body dynamics to solve
+for joint angles that place end-effectors at desired 6-DoF poses. Provides
+solvers for four robot variants:
+
+- G1_29_ArmIK: G1 29-DoF (14 arm joints including wrist)
+- G1_23_ArmIK: G1 23-DoF (10 arm joints, wrist roll only)
+- H1_2_ArmIK: H1_2 (14 arm joints including wrist)
+- H1_ArmIK: H1 (8 arm joints, shoulder + elbow only)
+
+Each solver:
+    1. Loads a URDF model and locks non-arm joints to create a reduced model
+    2. Builds a CasADi optimization problem minimizing translational error,
+       rotational error, regularization, and temporal smoothing costs
+    3. Solves with IPOPT (max 30 iterations, warm-started) for real-time use
+    4. Applies a WeightedMovingFilter for temporal smoothing
+    5. Computes feedforward torques via pin.rnea() (inverse dynamics)
+
+Optimization cost:
+    50 * ||translation_error||^2 + ||rotation_error||^2
+    + 0.02 * ||q||^2 (regularization) + 0.1 * ||q - q_prev||^2 (smoothing)
+"""
+
+import casadi
 import meshcat.geometry as mg
 import numpy as np
-import pinocchio as pin                             
+import pinocchio as pin
 import time
-from pinocchio import casadi as cpin    
-from pinocchio.visualize import MeshcatVisualizer   
+from pinocchio import casadi as cpin
+from pinocchio.visualize import MeshcatVisualizer
 import os
 import sys
 import pickle
+from typing import Optional, Tuple
 import logging_mp
 logger_mp = logging_mp.getLogger(__name__)
 parent2_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -15,8 +40,34 @@ sys.path.append(parent2_dir)
 
 from teleop.utils.weighted_moving_filter import WeightedMovingFilter
 
+
 class G1_29_ArmIK:
-    def __init__(self, Unit_Test = False, Visualization = False):
+    """Inverse kinematics solver for the G1 29-DoF robot (14 arm joints).
+
+    Loads the G1 URDF with 29-DoF body and 14 hand joints, locks all
+    non-arm joints, and builds a CasADi/IPOPT optimization for solving
+    dual-arm IK in real time (~30 Hz). Optionally caches the Pinocchio
+    model to pickle for faster subsequent startups.
+
+    Attributes:
+        robot: Full Pinocchio robot wrapper.
+        reduced_robot: Reduced robot with only arm joints active.
+        opti: CasADi optimization problem instance.
+        smooth_filter: WeightedMovingFilter for temporal IK smoothing.
+        vis: Optional MeshcatVisualizer for debug visualization.
+    """
+
+    def __init__(self, Unit_Test: bool = False, Visualization: bool = False) -> None:
+        """Initialize the G1_29 IK solver.
+
+        Loads the URDF model, builds a reduced robot by locking non-arm
+        joints, creates left/right end-effector frames, and sets up the
+        CasADi+IPOPT optimization problem.
+
+        Args:
+            Unit_Test: If True, use unit-test URDF paths (../../assets/).
+            Visualization: If True, initialize Meshcat 3D visualizer.
+        """
         np.set_printoptions(precision=5, suppress=True, linewidth=200)
 
         self.Unit_Test = Unit_Test
@@ -217,8 +268,12 @@ class G1_29_ArmIK:
                     )
                 )
 
-    # Save both robot.model and reduced_robot.model
-    def save_cache(self):
+    def save_cache(self) -> None:
+        """Serialize robot models to a pickle cache file.
+
+        Saves both the full and reduced Pinocchio models so subsequent
+        startups can skip the slow URDF parsing step.
+        """
         data = {
             "robot_model": self.robot.model,
             "reduced_model": self.reduced_robot.model,
@@ -227,8 +282,14 @@ class G1_29_ArmIK:
         with open(self.cache_path, "wb") as f:
             pickle.dump(data, f)
 
-    # Load both robot.model and reduced_robot.model
-    def load_cache(self):
+    def load_cache(self) -> Tuple[pin.RobotWrapper, pin.RobotWrapper]:
+        """Deserialize robot models from the pickle cache.
+
+        Returns:
+            A tuple ``(robot, reduced_robot)`` with freshly created
+            ``RobotWrapper`` instances whose models and data are
+            restored from the cache.
+        """
         with open(self.cache_path, "rb") as f:
             data = pickle.load(f)
 
@@ -242,7 +303,27 @@ class G1_29_ArmIK:
 
         return robot, reduced_robot
 
-    def scale_arms(self, human_left_pose, human_right_pose, human_arm_length=0.60, robot_arm_length=0.75):
+    def scale_arms(
+        self,
+        human_left_pose: np.ndarray,
+        human_right_pose: np.ndarray,
+        human_arm_length: float = 0.60,
+        robot_arm_length: float = 0.75,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Scale human wrist poses to match the robot's arm length.
+
+        Multiplies the translational components of each 4x4 pose matrix
+        by ``robot_arm_length / human_arm_length``.
+
+        Args:
+            human_left_pose: 4x4 homogeneous transform of the left wrist.
+            human_right_pose: 4x4 homogeneous transform of the right wrist.
+            human_arm_length: Human arm length in metres.
+            robot_arm_length: Robot arm length in metres.
+
+        Returns:
+            Tuple of scaled ``(left_pose, right_pose)`` matrices.
+        """
         scale_factor = robot_arm_length / human_arm_length
         robot_left_pose = human_left_pose.copy()
         robot_right_pose = human_right_pose.copy()
@@ -250,7 +331,33 @@ class G1_29_ArmIK:
         robot_right_pose[:3, 3] *= scale_factor
         return robot_left_pose, robot_right_pose
 
-    def solve_ik(self, left_wrist, right_wrist, current_lr_arm_motor_q = None, current_lr_arm_motor_dq = None):
+    def solve_ik(
+        self,
+        left_wrist: np.ndarray,
+        right_wrist: np.ndarray,
+        current_lr_arm_motor_q: Optional[np.ndarray] = None,
+        current_lr_arm_motor_dq: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Solve inverse kinematics for both arms simultaneously.
+
+        Warm-starts the CasADi/IPOPT solver from the previous solution
+        (or from ``current_lr_arm_motor_q`` if provided), solves for
+        joint angles, applies temporal smoothing, and computes
+        feedforward torques via RNEA inverse dynamics.
+
+        Args:
+            left_wrist: 4x4 target pose for the left end-effector.
+            right_wrist: 4x4 target pose for the right end-effector.
+            current_lr_arm_motor_q: Current joint positions to warm-start
+                the solver. If ``None``, uses the previous solution.
+            current_lr_arm_motor_dq: Current joint velocities (unused in
+                torque computation — zeroed for gravity compensation).
+
+        Returns:
+            Tuple ``(joint_positions, feedforward_torques)`` as numpy arrays.
+            On solver failure, falls back to ``current_lr_arm_motor_q``
+            with zero torques.
+        """
         if current_lr_arm_motor_q is not None:
             self.init_data = current_lr_arm_motor_q
         self.opti.set_initial(self.var_q, self.init_data)
@@ -285,7 +392,7 @@ class G1_29_ArmIK:
                 self.vis.display(sol_q)  # for visualization
 
             return sol_q, sol_tauff
-        
+
         except Exception as e:
             logger_mp.error(f"ERROR in convergence, plotting debug info.{e}")
 
@@ -308,9 +415,29 @@ class G1_29_ArmIK:
 
             # return sol_q, sol_tauff
             return current_lr_arm_motor_q, np.zeros(self.reduced_robot.model.nv)
-        
+
 class G1_23_ArmIK:
-    def __init__(self, Unit_Test = False, Visualization = False):
+    """Inverse kinematics solver for the G1 23-DoF robot (10 arm joints).
+
+    Similar to :class:`G1_29_ArmIK` but for the 23-DoF G1 variant with
+    wrist-roll-only end-effectors (5 joints per arm). Locks waist and
+    leg joints, keeping only shoulder, elbow, and wrist-roll active.
+
+    Attributes:
+        robot: Full Pinocchio robot wrapper.
+        reduced_robot: Reduced robot with only arm joints active.
+        opti: CasADi optimization problem instance.
+        smooth_filter: WeightedMovingFilter for temporal IK smoothing.
+        vis: Optional MeshcatVisualizer for debug visualization.
+    """
+
+    def __init__(self, Unit_Test: bool = False, Visualization: bool = False) -> None:
+        """Initialize the G1_23 IK solver.
+
+        Args:
+            Unit_Test: If True, use unit-test URDF paths (../../assets/).
+            Visualization: If True, initialize Meshcat 3D visualizer.
+        """
         np.set_printoptions(precision=5, suppress=True, linewidth=200)
 
         self.Unit_Test = Unit_Test
@@ -495,8 +622,8 @@ class G1_23_ArmIK:
                     )
                 )
 
-    # Save both robot.model and reduced_robot.model
-    def save_cache(self):
+    def save_cache(self) -> None:
+        """Serialize robot models to a pickle cache file."""
         data = {
             "robot_model": self.robot.model,
             "reduced_model": self.reduced_robot.model,
@@ -505,8 +632,12 @@ class G1_23_ArmIK:
         with open(self.cache_path, "wb") as f:
             pickle.dump(data, f)
 
-    # Load both robot.model and reduced_robot.model
-    def load_cache(self):
+    def load_cache(self) -> Tuple[pin.RobotWrapper, pin.RobotWrapper]:
+        """Deserialize robot models from the pickle cache.
+
+        Returns:
+            A tuple ``(robot, reduced_robot)`` restored from cache.
+        """
         with open(self.cache_path, "rb") as f:
             data = pickle.load(f)
 
@@ -520,8 +651,24 @@ class G1_23_ArmIK:
 
         return robot, reduced_robot
 
-    # If the robot arm is not the same size as your arm :)
-    def scale_arms(self, human_left_pose, human_right_pose, human_arm_length=0.60, robot_arm_length=0.75):
+    def scale_arms(
+        self,
+        human_left_pose: np.ndarray,
+        human_right_pose: np.ndarray,
+        human_arm_length: float = 0.60,
+        robot_arm_length: float = 0.75,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Scale human wrist poses to match the robot's arm length.
+
+        Args:
+            human_left_pose: 4x4 homogeneous transform of the left wrist.
+            human_right_pose: 4x4 homogeneous transform of the right wrist.
+            human_arm_length: Human arm length in metres.
+            robot_arm_length: Robot arm length in metres.
+
+        Returns:
+            Tuple of scaled ``(left_pose, right_pose)`` matrices.
+        """
         scale_factor = robot_arm_length / human_arm_length
         robot_left_pose = human_left_pose.copy()
         robot_right_pose = human_right_pose.copy()
@@ -529,7 +676,26 @@ class G1_23_ArmIK:
         robot_right_pose[:3, 3] *= scale_factor
         return robot_left_pose, robot_right_pose
 
-    def solve_ik(self, left_wrist, right_wrist, current_lr_arm_motor_q = None, current_lr_arm_motor_dq = None):
+    def solve_ik(
+        self,
+        left_wrist: np.ndarray,
+        right_wrist: np.ndarray,
+        current_lr_arm_motor_q: Optional[np.ndarray] = None,
+        current_lr_arm_motor_dq: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Solve inverse kinematics for both arms simultaneously.
+
+        Args:
+            left_wrist: 4x4 target pose for the left end-effector.
+            right_wrist: 4x4 target pose for the right end-effector.
+            current_lr_arm_motor_q: Current joint positions to warm-start.
+            current_lr_arm_motor_dq: Current joint velocities.
+
+        Returns:
+            Tuple ``(joint_positions, feedforward_torques)``.
+            On solver failure, falls back to ``current_lr_arm_motor_q``
+            with zero torques.
+        """
         if current_lr_arm_motor_q is not None:
             self.init_data = current_lr_arm_motor_q
         self.opti.set_initial(self.var_q, self.init_data)
@@ -564,7 +730,7 @@ class G1_23_ArmIK:
                 self.vis.display(sol_q)  # for visualization
 
             return sol_q, sol_tauff
-        
+
         except Exception as e:
             logger_mp.error(f"ERROR in convergence, plotting debug info.{e}")
 
@@ -590,7 +756,27 @@ class G1_23_ArmIK:
 
 
 class H1_2_ArmIK:
-    def __init__(self, Unit_Test = False, Visualization = False):
+    """Inverse kinematics solver for the H1_2 robot (14 arm joints).
+
+    Mirrors :class:`G1_29_ArmIK` but for the Unitree H1_2 humanoid.
+    Loads the H1_2 URDF, locks leg and waist joints, and solves
+    dual-arm IK via CasADi/IPOPT with arm-length scaling enabled.
+
+    Attributes:
+        robot: Full Pinocchio robot wrapper.
+        reduced_robot: Reduced robot with only arm joints active.
+        opti: CasADi optimization problem instance.
+        smooth_filter: WeightedMovingFilter for temporal IK smoothing.
+        vis: Optional MeshcatVisualizer for debug visualization.
+    """
+
+    def __init__(self, Unit_Test: bool = False, Visualization: bool = False) -> None:
+        """Initialize the H1_2 IK solver.
+
+        Args:
+            Unit_Test: If True, use unit-test URDF paths (../../assets/).
+            Visualization: If True, initialize Meshcat 3D visualizer.
+        """
         np.set_printoptions(precision=5, suppress=True, linewidth=200)
 
         self.Unit_Test = Unit_Test
@@ -799,8 +985,8 @@ class H1_2_ArmIK:
                     )
                 )
     
-    # Save both robot.model and reduced_robot.model
-    def save_cache(self):
+    def save_cache(self) -> None:
+        """Serialize robot models to a pickle cache file."""
         data = {
             "robot_model": self.robot.model,
             "reduced_model": self.reduced_robot.model,
@@ -809,8 +995,12 @@ class H1_2_ArmIK:
         with open(self.cache_path, "wb") as f:
             pickle.dump(data, f)
 
-    # Load both robot.model and reduced_robot.model
-    def load_cache(self):
+    def load_cache(self) -> Tuple[pin.RobotWrapper, pin.RobotWrapper]:
+        """Deserialize robot models from the pickle cache.
+
+        Returns:
+            A tuple ``(robot, reduced_robot)`` restored from cache.
+        """
         with open(self.cache_path, "rb") as f:
             data = pickle.load(f)
 
@@ -824,8 +1014,24 @@ class H1_2_ArmIK:
 
         return robot, reduced_robot
 
-    # If the robot arm is not the same size as your arm :)
-    def scale_arms(self, human_left_pose, human_right_pose, human_arm_length=0.60, robot_arm_length=0.75):
+    def scale_arms(
+        self,
+        human_left_pose: np.ndarray,
+        human_right_pose: np.ndarray,
+        human_arm_length: float = 0.60,
+        robot_arm_length: float = 0.75,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Scale human wrist poses to match the robot's arm length.
+
+        Args:
+            human_left_pose: 4x4 homogeneous transform of the left wrist.
+            human_right_pose: 4x4 homogeneous transform of the right wrist.
+            human_arm_length: Human arm length in metres.
+            robot_arm_length: Robot arm length in metres.
+
+        Returns:
+            Tuple of scaled ``(left_pose, right_pose)`` matrices.
+        """
         scale_factor = robot_arm_length / human_arm_length
         robot_left_pose = human_left_pose.copy()
         robot_right_pose = human_right_pose.copy()
@@ -833,7 +1039,27 @@ class H1_2_ArmIK:
         robot_right_pose[:3, 3] *= scale_factor
         return robot_left_pose, robot_right_pose
 
-    def solve_ik(self, left_wrist, right_wrist, current_lr_arm_motor_q = None, current_lr_arm_motor_dq = None):
+    def solve_ik(
+        self,
+        left_wrist: np.ndarray,
+        right_wrist: np.ndarray,
+        current_lr_arm_motor_q: Optional[np.ndarray] = None,
+        current_lr_arm_motor_dq: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Solve inverse kinematics for both arms with arm-length scaling.
+
+        Applies :meth:`scale_arms` before solving. See
+        :meth:`G1_29_ArmIK.solve_ik` for full parameter/return docs.
+
+        Args:
+            left_wrist: 4x4 target pose for the left end-effector.
+            right_wrist: 4x4 target pose for the right end-effector.
+            current_lr_arm_motor_q: Current joint positions to warm-start.
+            current_lr_arm_motor_dq: Current joint velocities.
+
+        Returns:
+            Tuple ``(joint_positions, feedforward_torques)``.
+        """
         if current_lr_arm_motor_q is not None:
             self.init_data = current_lr_arm_motor_q
         self.opti.set_initial(self.var_q, self.init_data)
@@ -868,7 +1094,7 @@ class H1_2_ArmIK:
                 self.vis.display(sol_q)  # for visualization
 
             return sol_q, sol_tauff
-        
+
         except Exception as e:
             logger_mp.error(f"ERROR in convergence, plotting debug info.{e}")
 
@@ -892,8 +1118,29 @@ class H1_2_ArmIK:
             # return sol_q, sol_tauff
             return current_lr_arm_motor_q, np.zeros(self.reduced_robot.model.nv)
 
+
 class H1_ArmIK:
-    def __init__(self, Unit_Test = False, Visualization = False):
+    """Inverse kinematics solver for the H1 robot (8 arm joints).
+
+    Simplest variant — the H1 has only shoulder and elbow joints
+    (4 per arm, 8 total). Locks all leg, waist, and wrist joints.
+    Applies arm-length scaling before solving.
+
+    Attributes:
+        robot: Full Pinocchio robot wrapper.
+        reduced_robot: Reduced robot with only arm joints active.
+        opti: CasADi optimization problem instance.
+        smooth_filter: WeightedMovingFilter for temporal IK smoothing.
+        vis: Optional MeshcatVisualizer for debug visualization.
+    """
+
+    def __init__(self, Unit_Test: bool = False, Visualization: bool = False) -> None:
+        """Initialize the H1 IK solver.
+
+        Args:
+            Unit_Test: If True, use unit-test URDF paths (../../assets/).
+            Visualization: If True, initialize Meshcat 3D visualizer.
+        """
         np.set_printoptions(precision=5, suppress=True, linewidth=200)
 
         self.Unit_Test = Unit_Test
@@ -1106,8 +1353,8 @@ class H1_ArmIK:
                     )
                 )
 
-    # Save both robot.model and reduced_robot.model
-    def save_cache(self):
+    def save_cache(self) -> None:
+        """Serialize robot models to a pickle cache file."""
         data = {
             "robot_model": self.robot.model,
             "reduced_model": self.reduced_robot.model,
@@ -1116,8 +1363,12 @@ class H1_ArmIK:
         with open(self.cache_path, "wb") as f:
             pickle.dump(data, f)
 
-    # Load both robot.model and reduced_robot.model
-    def load_cache(self):
+    def load_cache(self) -> Tuple[pin.RobotWrapper, pin.RobotWrapper]:
+        """Deserialize robot models from the pickle cache.
+
+        Returns:
+            A tuple ``(robot, reduced_robot)`` restored from cache.
+        """
         with open(self.cache_path, "rb") as f:
             data = pickle.load(f)
 
@@ -1131,8 +1382,24 @@ class H1_ArmIK:
 
         return robot, reduced_robot
 
-    # If the robot arm is not the same size as your arm :)
-    def scale_arms(self, human_left_pose, human_right_pose, human_arm_length=0.60, robot_arm_length=0.75):
+    def scale_arms(
+        self,
+        human_left_pose: np.ndarray,
+        human_right_pose: np.ndarray,
+        human_arm_length: float = 0.60,
+        robot_arm_length: float = 0.75,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Scale human wrist poses to match the robot's arm length.
+
+        Args:
+            human_left_pose: 4x4 homogeneous transform of the left wrist.
+            human_right_pose: 4x4 homogeneous transform of the right wrist.
+            human_arm_length: Human arm length in metres.
+            robot_arm_length: Robot arm length in metres.
+
+        Returns:
+            Tuple of scaled ``(left_pose, right_pose)`` matrices.
+        """
         scale_factor = robot_arm_length / human_arm_length
         robot_left_pose = human_left_pose.copy()
         robot_right_pose = human_right_pose.copy()
@@ -1140,7 +1407,24 @@ class H1_ArmIK:
         robot_right_pose[:3, 3] *= scale_factor
         return robot_left_pose, robot_right_pose
 
-    def solve_ik(self, left_wrist, right_wrist, current_lr_arm_motor_q = None, current_lr_arm_motor_dq = None):
+    def solve_ik(
+        self,
+        left_wrist: np.ndarray,
+        right_wrist: np.ndarray,
+        current_lr_arm_motor_q: Optional[np.ndarray] = None,
+        current_lr_arm_motor_dq: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Solve inverse kinematics for both arms with arm-length scaling.
+
+        Args:
+            left_wrist: 4x4 target pose for the left end-effector.
+            right_wrist: 4x4 target pose for the right end-effector.
+            current_lr_arm_motor_q: Current joint positions to warm-start.
+            current_lr_arm_motor_dq: Current joint velocities.
+
+        Returns:
+            Tuple ``(joint_positions, feedforward_torques)``.
+        """
         if current_lr_arm_motor_q is not None:
             self.init_data = current_lr_arm_motor_q
         self.opti.set_initial(self.var_q, self.init_data)
@@ -1175,7 +1459,7 @@ class H1_ArmIK:
                 self.vis.display(sol_q)  # for visualization
 
             return sol_q, sol_tauff
-        
+
         except Exception as e:
             logger_mp.error(f"ERROR in convergence, plotting debug info.{e}")
 
@@ -1198,7 +1482,8 @@ class H1_ArmIK:
 
             # return sol_q, sol_tauff
             return current_lr_arm_motor_q, np.zeros(self.reduced_robot.model.nv)
-        
+
+
 if __name__ == "__main__":
     arm_ik = G1_29_ArmIK(Unit_Test = True, Visualization = True)
     # arm_ik = H1_2_ArmIK(Unit_Test = True, Visualization = True)

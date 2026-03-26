@@ -1,3 +1,16 @@
+"""Rerun-based visualization for episode data.
+
+Provides both offline replay and online real-time visualization of
+robot states, actions, and camera images using the `Rerun
+<https://www.rerun.io/>`_ viewer.
+
+* **RerunEpisodeReader** -- loads recorded episode data (images, states,
+  actions, audio) from a task directory on disk.
+* **RerunLogger** -- logs teleoperation data items to the Rerun viewer
+  with time-series plots, supporting both batch (offline) and
+  streaming (online) modes.
+"""
+
 import os
 import json
 import cv2
@@ -5,32 +18,74 @@ import time
 import rerun as rr
 import rerun.blueprint as rrb
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
 os.environ["RUST_LOG"] = "error"
 
-class RerunEpisodeReader:
-    def __init__(self, task_dir = ".", json_file="data.json"):
-        self.task_dir = task_dir
-        self.json_file = json_file
 
-    def return_episode_data(self, episode_idx):
+class RerunEpisodeReader:
+    """Loads recorded episode data from a task directory on disk.
+
+    Each episode is expected to reside in a numbered sub-directory
+    (``episode_NNNN/``) containing a ``data.json`` manifest and
+    associated colour/depth image files plus audio numpy files.
+
+    Attributes:
+        task_dir: Root directory containing episode sub-directories.
+        json_file: Name of the JSON manifest file within each episode
+            directory (default ``"data.json"``).
+    """
+
+    def __init__(self, task_dir: str = ".", json_file: str = "data.json") -> None:
+        """Initialise the reader.
+
+        Args:
+            task_dir: Root directory that contains ``episode_NNNN/``
+                sub-directories.
+            json_file: Filename of the JSON data manifest inside each
+                episode directory.
+        """
+        self.task_dir: str = task_dir
+        self.json_file: str = json_file
+
+    def return_episode_data(self, episode_idx: int) -> List[Dict[str, Any]]:
+        """Load and return all items for a given episode.
+
+        Reads the JSON manifest, resolves relative image paths, loads
+        colour and depth images from disk, and returns a list of item
+        dictionaries suitable for passing to ``RerunLogger``.
+
+        Args:
+            episode_idx: Zero-padded numeric index of the episode to
+                load (e.g. ``6`` for ``episode_0006``).
+
+        Returns:
+            List of item dictionaries, each containing keys ``idx``,
+            ``colors``, ``depths``, ``states``, ``actions``,
+            ``tactiles``, and ``audios``.
+
+        Raises:
+            FileNotFoundError: If the episode's ``data.json`` does not
+                exist.
+        """
         # Load episode data on-demand
-        episode_dir = os.path.join(self.task_dir, f"episode_{episode_idx:04d}")
-        json_path = os.path.join(episode_dir, self.json_file)
+        episode_dir: str = os.path.join(self.task_dir, f"episode_{episode_idx:04d}")
+        json_path: str = os.path.join(episode_dir, self.json_file)
 
         if not os.path.exists(json_path):
             raise FileNotFoundError(f"Episode {episode_idx} data.json not found.")
 
         with open(json_path, 'r', encoding='utf-8') as jsonf:
-            json_file = json.load(jsonf)
+            json_file: Dict[str, Any] = json.load(jsonf)
 
-        episode_data = []
+        episode_data: List[Dict[str, Any]] = []
 
         # Loop over the data entries and process each one
         for item_data in json_file['data']:
             # Process images and other data
-            colors = self._process_images(item_data, 'colors', episode_dir)
-            depths = self._process_images(item_data, 'depths', episode_dir)
-            audios = self._process_audio(item_data, 'audios', episode_dir)
+            colors: Dict[str, Any] = self._process_images(item_data, 'colors', episode_dir)
+            depths: Dict[str, Any] = self._process_images(item_data, 'depths', episode_dir)
+            audios: Dict[str, Any] = self._process_audio(item_data, 'audios', episode_dir)
 
             # Append the data in the item_data list
             episode_data.append(
@@ -47,33 +102,105 @@ class RerunEpisodeReader:
 
         return episode_data
 
-    def _process_images(self, item_data, data_type, dir_path):
-        images = {}
+    def _process_images(
+        self,
+        item_data: Dict[str, Any],
+        data_type: str,
+        dir_path: str,
+    ) -> Dict[str, Any]:
+        """Load images referenced by an item's colour or depth entries.
+
+        Reads each image file from disk using OpenCV and converts it
+        from BGR to RGB colour space.
+
+        Args:
+            item_data: Single item dictionary from the JSON manifest.
+            data_type: Key to look up in *item_data* (``'colors'`` or
+                ``'depths'``).
+            dir_path: Base directory for resolving relative file paths.
+
+        Returns:
+            Dictionary mapping camera names to loaded RGB numpy arrays.
+        """
+        images: Dict[str, Any] = {}
 
         for key, file_name in item_data.get(data_type, {}).items():
             if file_name:
-                file_path = os.path.join(dir_path, file_name)
+                file_path: str = os.path.join(dir_path, file_name)
                 if os.path.exists(file_path):
                     image = cv2.imread(file_path)
                     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                     images[key] = image
         return images
 
-    def _process_audio(self, item_data, data_type, episode_dir):
-        audio_data = {}
-        dir_path = os.path.join(episode_dir, data_type)
+    def _process_audio(
+        self,
+        item_data: Dict[str, Any],
+        data_type: str,
+        episode_dir: str,
+    ) -> Dict[str, Any]:
+        """Load audio data referenced by an item's audio entries.
+
+        Args:
+            item_data: Single item dictionary from the JSON manifest.
+            data_type: Key to look up in *item_data* (``'audios'``).
+            episode_dir: Episode directory for resolving relative paths.
+
+        Returns:
+            Dictionary mapping microphone names to audio data.
+            Currently returns an empty dict (placeholder for future
+            audio handling).
+        """
+        audio_data: Dict[str, Any] = {}
+        dir_path: str = os.path.join(episode_dir, data_type)
 
         for key, file_name in item_data.get(data_type, {}).items():
             if file_name:
-                file_path = os.path.join(dir_path, file_name)
+                file_path: str = os.path.join(dir_path, file_name)
                 if os.path.exists(file_path):
                     pass  # Handle audio data if needed
         return audio_data
 
+
 class RerunLogger:
-    def __init__(self, prefix = "", IdxRangeBoundary = 30, memory_limit = None):
-        self.prefix = prefix
-        self.IdxRangeBoundary = IdxRangeBoundary
+    """Logs teleoperation data to the Rerun viewer with time-series plots.
+
+    Initialises a Rerun recording, spawns the viewer process, and
+    optionally sets up a blueprint with a 2x2 grid of time-series views
+    (left arm, right arm, left end-effector, right end-effector).
+
+    Supports two usage patterns:
+
+    * **Online (streaming)** -- call ``log_item_data`` once per frame.
+    * **Offline (batch)** -- call ``log_episode_data`` with a full
+      episode list.
+
+    Attributes:
+        prefix: Path prefix prepended to every Rerun entity path (e.g.
+            ``"online/"``).
+        IdxRangeBoundary: Number of past time steps visible in each
+            time-series view.  Set to ``0`` or ``None`` to disable the
+            sliding-window blueprint.
+    """
+
+    def __init__(
+        self,
+        prefix: str = "",
+        IdxRangeBoundary: int = 30,
+        memory_limit: Optional[str] = None,
+    ) -> None:
+        """Initialise the Rerun logger and spawn the viewer.
+
+        Args:
+            prefix: Entity path prefix for all logged data.
+            IdxRangeBoundary: Sliding-window width (in time steps) for
+                the time-series blueprint.  If falsy, no blueprint is
+                configured.
+            memory_limit: Optional memory limit string passed to
+                ``rr.spawn`` (e.g. ``"300MB"``).
+        """
+        self.prefix: str = prefix
+        self.IdxRangeBoundary: int = IdxRangeBoundary
         rr.init(datetime.now().strftime("Runtime_%Y%m%d_%H%M%S"))
         if memory_limit:
             rr.spawn(memory_limit = memory_limit, hide_welcome_screen = True)
@@ -84,13 +211,21 @@ class RerunLogger:
         if self.IdxRangeBoundary:
             self.setup_blueprint()
 
-    def setup_blueprint(self):
-        views = []
+    def setup_blueprint(self) -> None:
+        """Configure a 2x2 Rerun blueprint with time-series views.
 
-        data_plot_paths = [
-                           f"{self.prefix}left_arm", 
-                           f"{self.prefix}right_arm", 
-                           f"{self.prefix}left_ee", 
+        Creates ``TimeSeriesView`` panels for left arm, right arm, left
+        end-effector, and right end-effector, each showing a sliding
+        window of ``IdxRangeBoundary`` time steps.  Selection and time
+        panels are collapsed by default.
+        """
+        views: List[Any] = []
+
+        # Entity paths for the four time-series panels
+        data_plot_paths: List[str] = [
+                           f"{self.prefix}left_arm",
+                           f"{self.prefix}right_arm",
+                           f"{self.prefix}left_ee",
                            f"{self.prefix}right_ee"
         ]
         for plot_path in data_plot_paths:
@@ -127,31 +262,42 @@ class RerunLogger:
         #     views.append(view)
 
         grid = rrb.Grid(contents = views,
-                        grid_columns=2,               
+                        grid_columns=2,
                         column_shares=[1, 1],
-                        row_shares=[1, 1], 
+                        row_shares=[1, 1],
         )
         views.append(rr.blueprint.SelectionPanel(state=rrb.PanelState.Collapsed))
         views.append(rr.blueprint.TimePanel(state=rrb.PanelState.Collapsed))
         rr.send_blueprint(grid)
 
 
-    def log_item_data(self, item_data: dict):
+    def log_item_data(self, item_data: dict) -> None:
+        """Log a single data frame to the Rerun viewer.
+
+        Sets the Rerun time sequence index and logs per-joint scalar
+        values for states and actions of each body part (excluding
+        ``"body"``).
+
+        Args:
+            item_data: Item dictionary with keys ``idx``, ``states``,
+                ``actions``, and optionally ``colors``, ``depths``,
+                ``tactiles``, ``audios``.
+        """
         rr.set_time_sequence("idx", item_data.get('idx', 0))
 
         # Log states
-        states = item_data.get('states', {}) or {}
+        states: Dict[str, Any] = item_data.get('states', {}) or {}
         for part, state_info in states.items():
             if part != "body" and state_info:
-                values = state_info.get('qpos', [])
+                values: List[float] = state_info.get('qpos', [])
                 for idx, val in enumerate(values):
                     rr.log(f"{self.prefix}{part}/states/qpos/{idx}", rr.Scalar(val))
 
         # Log actions
-        actions = item_data.get('actions', {}) or {}
+        actions: Dict[str, Any] = item_data.get('actions', {}) or {}
         for part, action_info in actions.items():
             if part != "body" and action_info:
-                values = action_info.get('qpos', [])
+                values: List[float] = action_info.get('qpos', [])
                 for idx, val in enumerate(values):
                     rr.log(f"{self.prefix}{part}/actions/qpos/{idx}", rr.Scalar(val))
 
@@ -180,7 +326,16 @@ class RerunLogger:
         #     if audio_val is not None:
         #         pass  # Handle audios if needed
 
-    def log_episode_data(self, episode_data: list):
+    def log_episode_data(self, episode_data: list) -> None:
+        """Log an entire episode to the Rerun viewer.
+
+        Iterates over every item in *episode_data* and calls
+        ``log_item_data`` for each one.
+
+        Args:
+            episode_data: List of item dictionaries as returned by
+                ``RerunEpisodeReader.return_episode_data``.
+        """
         for item_data in episode_data:
             self.log_item_data(item_data)
 
