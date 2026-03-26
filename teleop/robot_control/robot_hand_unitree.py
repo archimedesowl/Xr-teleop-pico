@@ -4,13 +4,13 @@ Handles hand state subscription, retargeting from XR hand tracking data,
 and motor command publishing.
 """
 
-# for dex3-1
-from unitree_sdk2py.core.channel import ChannelPublisher, ChannelSubscriber, ChannelFactoryInitialize # dds
-from unitree_sdk2py.idl.unitree_hg.msg.dds_ import HandCmd_, HandState_                               # idl
+# DDS imports (shared by Dex3-1 and Dex1-1)
+from unitree_sdk2py.core.channel import ChannelPublisher, ChannelSubscriber, ChannelFactoryInitialize
+# Dex3-1 IDL
+from unitree_sdk2py.idl.unitree_hg.msg.dds_ import HandCmd_, HandState_
 from unitree_sdk2py.idl.default import unitree_hg_msg_dds__HandCmd_
-# for gripper
-from unitree_sdk2py.core.channel import ChannelPublisher, ChannelSubscriber, ChannelFactoryInitialize # dds
-from unitree_sdk2py.idl.unitree_go.msg.dds_ import MotorCmds_, MotorStates_                           # idl
+# Dex1-1 gripper IDL
+from unitree_sdk2py.idl.unitree_go.msg.dds_ import MotorCmds_, MotorStates_
 from unitree_sdk2py.idl.default import unitree_go_msg_dds__MotorCmd_
 
 import numpy as np
