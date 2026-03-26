@@ -85,6 +85,14 @@ Data Flow (per frame, ~30 Hz):
 | `--display-mode` | `immersive`, `ego`, or `pass-through` | `immersive` |
 | `--network-interface` | Network interface for DDS (auto-detected if omitted) | Auto |
 | `--ipc` | Use ZMQ IPC instead of sshkeyboard | Off |
+| `--dds-channel` | DDS domain ID override (0=real, 1=sim). Auto-detected from `--sim` flag if not set | Auto |
+| `--task-dir` | Directory path for saving recorded episode data | `./utils/data/` |
+| `--task-name` | Task name for recording | `pick cube` |
+| `--task-goal` | Task goal description for JSON metadata | None |
+| `--task-desc` | Task description for JSON metadata | None |
+| `--task-steps` | Task steps for JSON metadata | None |
+| `--img-server-ip` | IP address of the image server | `192.168.123.164` |
+| `--affinity` | Enable CPU affinity and high priority mode | Off |
 
 ## Troubleshooting
 
