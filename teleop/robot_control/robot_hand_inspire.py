@@ -195,6 +195,20 @@ class Inspire_Controller_DFX:
         for idx, id in enumerate(Inspire_Right_Hand_JointIndex):
             self.hand_msg.cmds[id].q = 1.0
 
+        def normalize(val: float, min_val: float, max_val: float) -> float:
+            """Normalizes a radian value to [0, 1] with inverted mapping.
+
+            Args:
+                val: Raw retargeted joint angle in radians.
+                min_val: Minimum expected radian value.
+                max_val: Maximum expected radian value.
+
+            Returns:
+                Normalized value clipped to [0.0, 1.0], where
+                max_val maps to 0.0 and min_val maps to 1.0.
+            """
+            return np.clip((max_val - val) / (max_val - min_val), 0.0, 1.0)
+
         try:
             while self.running:
                 start_time = time.time()
@@ -224,19 +238,6 @@ class Inspire_Controller_DFX:
                     #     - idx 4:   0~0.5
                     #     - idx 5:  -0.1~1.3
                     # We normalize them using (max - value) / range
-                    def normalize(val: float, min_val: float, max_val: float) -> float:
-                        """Normalizes a radian value to [0, 1] with inverted mapping.
-
-                        Args:
-                            val: Raw retargeted joint angle in radians.
-                            min_val: Minimum expected radian value.
-                            max_val: Maximum expected radian value.
-
-                        Returns:
-                            Normalized value clipped to [0.0, 1.0], where
-                            max_val maps to 0.0 and min_val maps to 1.0.
-                        """
-                        return np.clip((max_val - val) / (max_val - min_val), 0.0, 1.0)
 
                     # Normalize each motor's radian value to [0, 1] using its specific range
                     for idx in range(Inspire_Num_Motors):
@@ -488,6 +489,20 @@ class Inspire_Controller_FTP:
         left_q_target  = np.full(Inspire_Num_Motors, 1.0)
         right_q_target = np.full(Inspire_Num_Motors, 1.0)
 
+        def normalize(val: float, min_val: float, max_val: float) -> float:
+            """Normalizes a radian value to [0, 1] with inverted mapping.
+
+            Args:
+                val: Raw retargeted joint angle in radians.
+                min_val: Minimum expected radian value.
+                max_val: Maximum expected radian value.
+
+            Returns:
+                Normalized value clipped to [0.0, 1.0], where
+                max_val maps to 0.0 and min_val maps to 1.0.
+            """
+            return np.clip((max_val - val) / (max_val - min_val), 0.0, 1.0)
+
         try:
             while self.running:
                 start_time = time.time()
@@ -509,20 +524,6 @@ class Inspire_Controller_FTP:
                     # Retarget XR skeleton to motor joint positions (radians)
                     left_q_target  = self.hand_retargeting.left_retargeting.retarget(ref_left_value)[self.hand_retargeting.left_dex_retargeting_to_hardware]
                     right_q_target = self.hand_retargeting.right_retargeting.retarget(ref_right_value)[self.hand_retargeting.right_dex_retargeting_to_hardware]
-
-                    def normalize(val: float, min_val: float, max_val: float) -> float:
-                        """Normalizes a radian value to [0, 1] with inverted mapping.
-
-                        Args:
-                            val: Raw retargeted joint angle in radians.
-                            min_val: Minimum expected radian value.
-                            max_val: Maximum expected radian value.
-
-                        Returns:
-                            Normalized value clipped to [0.0, 1.0], where
-                            max_val maps to 0.0 and min_val maps to 1.0.
-                        """
-                        return np.clip((max_val - val) / (max_val - min_val), 0.0, 1.0)
 
                     # Normalize each motor's radian value to [0, 1] using its specific range
                     for idx in range(Inspire_Num_Motors):
