@@ -217,6 +217,24 @@ class Brainco_Controller:
             self.right_hand_msg.cmds[id].q = 0.0
             self.right_hand_msg.cmds[id].dq = 1.0
 
+        def normalize(val: float, min_val: float, max_val: float) -> float:
+            """Normalizes a radian value to [0, 1] with inverted-then-flipped mapping.
+
+            For BrainCo, 0.0 = open and 1.0 = closed, so we apply
+            ``1.0 - clip((max - val) / range, 0, 1)``.
+
+            Args:
+                val: Raw retargeted joint angle in radians.
+                min_val: Minimum expected radian value.
+                max_val: Maximum expected radian value.
+
+            Returns:
+                Normalized value clipped to [0.0, 1.0], where
+                min_val maps to 0.0 (open) and max_val maps to
+                1.0 (closed).
+            """
+            return 1.0 - np.clip((max_val - val) / (max_val - min_val), 0.0, 1.0)
+
         try:
             while self.running:
                 start_time = time.time()
@@ -245,23 +263,6 @@ class Brainco_Controller:
                     #     - idx 1:   0~1.05
                     #     - idx 2~5: 0~1.47
                     # We normalize them using (max - value) / range
-                    def normalize(val: float, min_val: float, max_val: float) -> float:
-                        """Normalizes a radian value to [0, 1] with inverted-then-flipped mapping.
-
-                        For BrainCo, 0.0 = open and 1.0 = closed, so we apply
-                        ``1.0 - clip((max - val) / range, 0, 1)``.
-
-                        Args:
-                            val: Raw retargeted joint angle in radians.
-                            min_val: Minimum expected radian value.
-                            max_val: Maximum expected radian value.
-
-                        Returns:
-                            Normalized value clipped to [0.0, 1.0], where
-                            min_val maps to 0.0 (open) and max_val maps to
-                            1.0 (closed).
-                        """
-                        return 1.0 - np.clip((max_val - val) / (max_val - min_val), 0.0, 1.0)
 
                     # Normalize each motor's radian value to [0, 1] using its specific range
                     for idx in range(brainco_Num_Motors):
